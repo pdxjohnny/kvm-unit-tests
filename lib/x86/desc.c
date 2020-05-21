@@ -251,6 +251,14 @@ unsigned exception_vector(void)
     return vector;
 }
 
+int write_cr0_checking(unsigned long val)
+{
+    asm volatile(ASM_TRY("1f")
+		 "mov %0, %%cr0\n\t"
+		 "1:" : : "r" (val));
+    return exception_vector();
+}
+
 int write_cr4_checking(unsigned long val)
 {
     asm volatile(ASM_TRY("1f")

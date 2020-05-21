@@ -8371,6 +8371,173 @@ static void vmentry_movss_shadow_test(void)
 	vmcs_write(GUEST_RFLAGS, X86_EFLAGS_FIXED);
 }
 
+#include <alloc_page.h>
+
+#define USER_BASE	((1 << 23) * 2)
+
+#define CR0_PINNED X86_CR0_WP
+#define CR4_SOME_PINNED (X86_CR4_UMIP | X86_CR4_SMEP)
+#define CR4_ALL_PINNED (CR4_SOME_PINNED | X86_CR4_SMAP | X86_CR4_FSGSBASE)
+
+static bool vmx_cr_pin_cpu_feature_check(void)
+{
+	if (!this_cpu_has(X86_FEATURE_CR_PIN)) {
+		report_skip("CR pining not detected");
+		return 0;
+	}
+	if (!this_cpu_has(X86_FEATURE_UMIP)) {
+		report_skip("UMIP not detected");
+		return 0;
+	}
+	if (!this_cpu_has(X86_FEATURE_SMEP)) {
+		report_skip("SMEP not detected");
+		return 0;
+	}
+	if (!this_cpu_has(X86_FEATURE_SMAP)) {
+		report_skip("SMAP not detected");
+		return 0;
+	}
+
+	return 1;
+}
+
+static void vmx_cr_pin_map_user(void)
+{
+	unsigned long i;
+
+	if (reserve_pages(USER_BASE, (USER_BASE / 2) >> 12))
+	 	report_abort("Could not reserve memory");
+	// Map first 8MB as supervisor pages
+	for (i = 0; i < USER_BASE; i += PAGE_SIZE) {
+		*get_pte(phys_to_virt(read_cr3()), phys_to_virt(i)) &= ~PT_USER_MASK;
+		invlpg((void *)i);
+	}
+
+	// Present the same 8MB as user pages in the 8MB-16MB range
+	for (i = USER_BASE; i < 2 * USER_BASE; i += PAGE_SIZE) {
+		*get_pte(phys_to_virt(read_cr3()), phys_to_virt(i)) &= ~USER_BASE;
+		invlpg((void *)i);
+	}
+}
+
+static void vmx_cr_pin_test_guest(void)
+{
+	unsigned long cr0, cr4;
+
+	/* Step 1. Skip feature detection to skip handling VMX_CPUID */
+	/* nop */
+
+	/* Step 2. Setup user pages so that we can enable SMAP */
+	vmx_cr_pin_map_user();
+
+	/* Step 3. Enable CR0/4 bits */
+	cr0 = read_cr0() | X86_CR0_WP;
+	TEST_ASSERT(!write_cr0_checking(cr0));
+	cr0 = read_cr0();
+	report(cr0 & X86_CR0_WP, "L2 cr0 has WP bit: cr0(%lx)", cr0);
+
+	report(1, "L2 cr4 bits: cr4(%lx)", read_cr4());
+	cr4 = read_cr4() | CR4_ALL_PINNED;
+	report(1, "L2 cr4 bits after setting pinning pre-write: cr4(%lx)", cr4);
+	TEST_ASSERT(!write_cr4_checking(cr4));
+	cr4 = read_cr4();
+	report((cr4 & CR4_ALL_PINNED) == CR4_ALL_PINNED,
+		"L2 cr4 has correct bits: cr4(%lx)", cr4);
+
+	/* Step 3. Call to host */
+	vmx_set_test_stage(1);
+	vmcall();
+
+	/* Step 4. Disable bits that the host has pinned to make sure host
+	 * pinning doesn't effect us.
+	 */
+	cr0 = read_cr0() & ~X86_CR0_WP;
+	TEST_ASSERT(!write_cr0_checking(cr0));
+	cr0 = read_cr0();
+	report(!(cr0 & X86_CR0_WP),
+		"L2 cr0 should not have host pinned WP bit: cr0(%lx)", cr0);
+
+	cr4 = read_cr4() & ~CR4_ALL_PINNED;
+	TEST_ASSERT(!write_cr4_checking(cr4));
+	cr4 = read_cr4();
+	report(!(cr4 & CR4_ALL_PINNED),
+		"L2 cr4 should not have host pinned bits: cr4(%lx)", cr4);
+
+	/* Step 5. Call to host */
+	vmx_set_test_stage(2);
+	vmcall();
+
+	/* Step 6. Ensure CR registers still do not contain L1 pinned values */
+	report(!(cr0 & X86_CR0_WP),
+		"L2 cr0 should still not have host pinned WP bit: cr0(%lx)", cr0);
+	report(!(cr4 & CR4_ALL_PINNED),
+		"L2 cr4 should still not have host pinned bits: cr4(%lx)", cr4);
+
+	vmx_set_test_stage(3);
+}
+
+static void vmx_cr_pin_no_enforce_l1_on_l2(void)
+{
+	unsigned long long r = 0;
+	unsigned long cr0, cr4;
+
+	/* Step 1. Ensure we have required CR4 bits / KVM support for pinning */
+	if (!vmx_cr_pin_cpu_feature_check())
+		return;
+
+	/* Step 2. Setup user pages so that we can enable SMAP */
+	vmx_cr_pin_map_user();
+
+	/* Step 3. Enable CR0/4 bits */
+	cr0 = read_cr0() | X86_CR0_WP;
+	TEST_ASSERT(!write_cr0_checking(cr0));
+	cr0 = read_cr0();
+	report(cr0 & X86_CR0_WP, "L1 cr0 has WP bit: cr0(%lx)", cr0);
+
+	cr4 = read_cr4() | CR4_ALL_PINNED;
+	TEST_ASSERT(!write_cr4_checking(cr4));
+	cr4 = read_cr4();
+	report((cr4 & CR4_ALL_PINNED) == CR4_ALL_PINNED,
+		"L1 cr4 has correct bits: cr4(%lx)", cr4);
+
+	/* Step 3. Pin CR0/4 bits */
+	wrmsr(MSR_KVM_CR0_PINNED_HIGH, CR0_PINNED);
+	r = rdmsr(MSR_KVM_CR0_PINNED_HIGH);
+	report(r == X86_CR0_WP, "MSR_KVM_CR0_PINNED_HIGH: %llx", r);
+
+	wrmsr(MSR_KVM_CR4_PINNED_HIGH, CR4_ALL_PINNED);
+	r = rdmsr(MSR_KVM_CR4_PINNED_HIGH);
+	report(r == CR4_ALL_PINNED, "MSR_KVM_CR4_PINNED_HIGH: %llx", r);
+
+	/* Step 3.1. Modify VMCS so that Host-state contains pinned cr values */
+	vmcs_write(HOST_CR0, read_cr0());
+	vmcs_write(HOST_CR4, read_cr4());
+
+	/* Step 4. Enter guest for first time */
+	test_set_guest(vmx_cr_pin_test_guest);
+	enter_guest();
+	skip_exit_vmcall();
+	TEST_ASSERT_EQ(vmx_get_test_stage(), 1);
+
+	/* Step 5. Enter guest second time */
+	enter_guest();
+	skip_exit_vmcall();
+	TEST_ASSERT_EQ(vmx_get_test_stage(), 2);
+
+	/* Step 6. Ensure CR registers still contain pinned values */
+	cr0 = read_cr0();
+	cr4 = read_cr4();
+	report(cr0 & X86_CR0_WP,
+		"L1 cr0 WP bit still pinned: cr0(%lx)", cr0);
+	report((cr4 & CR4_ALL_PINNED) == CR4_ALL_PINNED,
+		"L1 cr4 bits still pinned: cr4(%lx)", cr4);
+
+	/* Step 7. Run L2 to completion */
+	enter_guest();
+	skip_exit_vmcall();
+	TEST_ASSERT_EQ(vmx_get_test_stage(), 3);
+}
+
 static void vmx_cr_load_test(void)
 {
 	unsigned long cr3, cr4, orig_cr3, orig_cr4;
@@ -10665,6 +10832,8 @@ struct vmx_test vmx_tests[] = {
 	TEST(vmx_sipi_signal_test),
 	/* VMCS Shadowing tests */
 	TEST(vmx_vmcs_shadow_test),
+	/* CR pinning tests */
+	TEST(vmx_cr_pin_no_enforce_l1_on_l2),
 	/* Regression tests */
 	TEST(vmx_cr_load_test),
 	TEST(vmx_cr4_osxsave_test),

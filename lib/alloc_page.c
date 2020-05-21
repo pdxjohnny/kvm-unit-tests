@@ -79,6 +79,12 @@ static inline bool area_contains_pfn(struct mem_area *a, pfn_t pfn)
  */
 static inline bool usable_area_contains_pfn(struct mem_area *a, pfn_t pfn)
 {
+	printf("pfn >= a->base %d\n", pfn >= a->base);
+	printf("a->base        0x%08lu\n", a->base);
+	printf("pfn            0x%08lu\n", pfn);
+	printf("a->top         0x%08lu\n", a->top);
+	printf("pfn < a->top   %d\n", pfn < a->top);
+	printf("return         %d\n", (pfn >= a->base) && (pfn < a->top));
 	return (pfn >= a->base) && (pfn < a->top);
 }
 
@@ -196,9 +202,12 @@ static struct mem_area *get_area(pfn_t pfn)
 {
 	uintptr_t i;
 
-	for (i = 0; i < MAX_AREAS; i++)
+	for (i = 0; i < MAX_AREAS; i++) {
+		printf("get_area(pfn %ld) areas_mask(0x%08u) BIT(i) is 0x%08lu usable_area_contains_pfn(areas[+ i]->base(0x%08lu), areas[+ i]->top(0x%08lu)), pfn(0x%08lu))\n", pfn, areas_mask, BIT(i), (areas + i)->base, (areas + i)->top, pfn);
+		printf("areas_mask & BIT(i) is 0x%08lu\n", areas_mask & BIT(i));
 		if ((areas_mask & BIT(i)) && usable_area_contains_pfn(areas + i, pfn))
 			return areas + i;
+	}
 	return NULL;
 }
 
@@ -330,11 +339,15 @@ static int _reserve_one_page(pfn_t pfn)
 	pfn_t mask, i;
 
 	a = get_area(pfn);
-	if (!a)
+	if (!a) {
+		printf("get_area failed\n");
 		return -1;
+	}
 	i = pfn - a->base;
-	if (!IS_USABLE(a->page_states[i]))
+	if (!IS_USABLE(a->page_states[i])) {
+		printf("Page %ld not usable\n", i);
 		return -1;
+	}
 	while (a->page_states[i]) {
 		mask = GENMASK_ULL(63, a->page_states[i]);
 		split(a, pfn_to_virt(pfn & mask));
@@ -364,9 +377,11 @@ int reserve_pages(phys_addr_t addr, size_t n)
 	assert(IS_ALIGNED(addr, PAGE_SIZE));
 	pfn = addr >> PAGE_SHIFT;
 	spin_lock(&lock);
-	for (i = 0; i < n; i++)
+	for (i = 0; i < n; i++) {
+		printf("_reserve_one_page(pfn + %ld)\n", i);
 		if (_reserve_one_page(pfn + i))
 			break;
+	}
 	if (i < n) {
 		for (n = 0 ; n < i; n++)
 			_unreserve_one_page(pfn + n);
