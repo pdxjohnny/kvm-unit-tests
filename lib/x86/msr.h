@@ -432,4 +432,12 @@
 #define MSR_VM_IGNNE                    0xc0010115
 #define MSR_VM_HSAVE_PA                 0xc0010117
 
+/* KVM MSRs */
+#define MSR_KVM_CR0_PIN_ALLOWED		0x4b564d08
+#define MSR_KVM_CR4_PIN_ALLOWED		0x4b564d09
+#define MSR_KVM_CR0_PINNED_LOW		0x4b564d0a
+#define MSR_KVM_CR0_PINNED_HIGH		0x4b564d0b
+#define MSR_KVM_CR4_PINNED_LOW		0x4b564d0c
+#define MSR_KVM_CR4_PINNED_HIGH		0x4b564d0d
+
 #endif /* _ASM_X86_MSR_INDEX_H */

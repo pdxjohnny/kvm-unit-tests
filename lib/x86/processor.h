@@ -46,6 +46,7 @@
 #define X86_CR4_UMIP	0x00000800
 #define X86_CR4_LA57	0x00001000
 #define X86_CR4_VMXE	0x00002000
+#define X86_CR4_FSGSBASE	0x00010000
 #define X86_CR4_PCIDE	0x00020000
 #define X86_CR4_OSXSAVE	0x00040000
 #define X86_CR4_SMEP	0x00100000
@@ -149,6 +150,7 @@ static inline u8 cpuid_maxphyaddr(void)
 #define	X86_FEATURE_SMEP	        (CPUID(0x7, 0, EBX, 7))
 #define	X86_FEATURE_INVPCID		(CPUID(0x7, 0, EBX, 10))
 #define	X86_FEATURE_RTM			(CPUID(0x7, 0, EBX, 11))
+#define	X86_FEATURE_SMEP		(CPUID(0x7, 0, EBX, 7))
 #define	X86_FEATURE_SMAP		(CPUID(0x7, 0, EBX, 20))
 #define	X86_FEATURE_PCOMMIT		(CPUID(0x7, 0, EBX, 22))
 #define	X86_FEATURE_CLFLUSHOPT		(CPUID(0x7, 0, EBX, 23))
@@ -170,6 +172,11 @@ static inline u8 cpuid_maxphyaddr(void)
 #define	X86_FEATURE_AMD_IBPB		(CPUID(0x80000008, 0, EBX, 12))
 #define	X86_FEATURE_NPT			(CPUID(0x8000000A, 0, EDX, 0))
 #define	X86_FEATURE_NRIPS		(CPUID(0x8000000A, 0, EDX, 3))
+
+/*
+ * KVM CPUID features
+ */
+#define	X86_FEATURE_CR_PIN		(CPUID(0x40000001, 0, EAX, 16))
 
 
 static inline bool this_cpu_has(u64 feature)

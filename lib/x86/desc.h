@@ -211,6 +211,7 @@ extern tss64_t tss;
 #endif
 
 unsigned exception_vector(void);
+int write_cr0_checking(unsigned long val);
 int write_cr4_checking(unsigned long val);
 unsigned exception_error_code(void);
 bool exception_rflags_rf(void);
